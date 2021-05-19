@@ -25,7 +25,7 @@ class YaFFS2
 		@oob = []
 		(@raw.length/sz).times { |i|
 			@chunk << @raw[i*sz, @chunksize]
-			@oob << parse_oob(@raw[i*sz+@chunksize, @oobsize], @chunk.last)
+			@oob << parse_oob(@raw[i*sz+@chunksize, @oobsize], @chunk.last, i)
 		}
 	end
 
@@ -40,7 +40,7 @@ class YaFFS2
 	# parse one raw oob, return a hash
 	# will parse the chunk data if oob shows its a metadata chunk
 	# TODO you may need to adapt that to your specific OOB encoding
-	def parse_oob(oob, chunk)
+	def parse_oob(oob, chunk, chunkseq)
 		blockstate, chunkid, objectid, nbytes, blockseq = oob.unpack('CNNnN')
 		tag = {
 			#:raw => oob,
@@ -48,7 +48,8 @@ class YaFFS2
 			:chunkid => chunkid,		# sequence nr of chunk in file data; 1st data chunk = id 1, header = id 0
 			:objectid => objectid,		# file identifier (all chunks of a file have same objid)
 			:nbytes => nbytes,		# size of chunk (max, except for last chunk of file)
-			:blockseq => blockseq		# distinguish newer versions of a chunk in another block (higher = newer)
+			:blockseq => blockseq,		# distinguish newer versions of a chunk in another block (higher = newer)
+			:chunkseq => chunkseq,		# sequence of chunks on the raw device (distinguish same blockseq)
 		}
 
 		if tag[:chunkid] == 0
@@ -251,7 +252,7 @@ class YaFFS2
 					b = basenames.first
 					b = "objid_#{curid}" if b == ''
 					subdir = File.join(curpath, b)
-					Dir.mkdir(subdir)
+					Dir.mkdir(subdir) rescue nil
 					puts subdir
 					clds.map { |path, id, idx, parentid, basename| id }.uniq.each { |id| rec[id, subdir, curid] }
 				end
@@ -259,6 +260,32 @@ class YaFFS2
 		}
 
 		rec[rroots_id.first, '.', 0]
+	end
+
+	def fullpath(id, base=nil)
+		return "/#{base}" if id == 1
+		return "(unlinked)/#{base}" if id == 3
+		return "(deleted)/#{base}" if id == 4
+		return "#{base}" if not @obj_headers[id]
+
+		name = @obj_headers[id].map { |oob| oob[:fname] if not base or oob[:objtype] == 3 }.compact.uniq.join('_')
+		parent = @obj_headers[id].map { |oob| oob[:parentid] }.compact.uniq.sort.last
+		name += '/' + base if base
+		fullpath(parent, name)
+	end
+
+	def dump_timeline
+		lines = []
+		@oob.each { |oob|
+			next if not oob[:mtime]
+			path = fullpath(oob[:parentid], oob[:fname])
+			lines << [oob[:mtime], oob[:objectid], oob[:blockseq], oob[:chunkseq],
+				oob[:mtime_a].inspect, oob[:parentid], oob[:nbytes], path.inspect]
+		}
+
+						#values_at to discard blockseq/chunkseq, used only for sorting
+		puts 'time,id,time_s,parent_id,size,path'
+		puts lines.uniq.sort.map { |l| l.values_at(0, 1, 4, 5, 6, 7).join(',') }
 	end
 
 	# prevent ruby crash when raising an exception
@@ -289,6 +316,8 @@ if $0 == __FILE__
 		}
 	when '-r'
 		yaffs.fulldump_to_tree
+	when '-t'
+		yaffs.dump_timeline
 	when /^\d+$/
 		yaffs.extract_file_history(obj_id.to_i)
 	when nil
