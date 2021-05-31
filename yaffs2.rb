@@ -41,6 +41,53 @@ class YaFFS2
 	# will parse the chunk data if oob shows its a metadata chunk
 	# TODO you may need to adapt that to your specific OOB encoding
 	def parse_oob(oob, chunk, chunkseq)
+		case @chunksize
+		when 512
+			parse_oob_yaffs1(oob, chunk, chunkseq)
+		else
+			parse_oob_yaffs2(oob, chunk, chunkseq)
+		end
+	end
+
+	def parse_oob_yaffs1(oob, chunk, chunkseq)
+		dw1, _x, _x, w2, _x, _x, _x, w3 = oob.unpack('NCCnCCCn')
+		dw2 = (w2 << 16) | w3
+		tag = {
+			:chunkid  => ((dw1 >> 12) & ((1 << 20) - 1)),
+			:serialnr => ((dw1 >> 10) & ((1 <<  2) - 1)),
+			:nbytes   => ((dw1 >>  0) & ((1 << 10) - 1)),
+			:objectid => ((dw2 >> 14) & ((1 << 18) - 1)),
+			# :ecc 12
+			# :unused 2
+			# :raw => oob.unpack('H*').first,
+		}
+
+		if tag[:chunkid] == 0
+			objtype, parentid, _ncksum, fname, _npad, mode, uid, gid, atime, mtime, ctime, filesz, lnkid, lnkname = chunk.unpack('NNnZ256nNNNNNNNNZ256')
+			tag[:objtype] = objtype
+			tag[:parentid] = parentid
+			tag[:fname] = fname
+			tag[:mode] = mode
+			tag[:uid] = uid
+			tag[:gid] = gid
+			tag[:atime] = atime
+			tag[:mtime] = mtime
+			tag[:mtime_a] = Time.at(mtime).utc.strftime("%Y-%m-%d %H:%M:%S Z")
+			tag[:ctime] = ctime
+
+			case objtype
+			when 1; tag[:filesz] = filesz
+			when 2; tag[:symlink] = lnkname
+			when 3;
+			when 4; tag[:link] = lnkid
+			else;   tag[:chunk_raw] = chunk.unpack('H*').first
+			end
+		end
+
+		tag
+	end
+
+	def parse_oob_yaffs2(oob, chunk, chunkseq)
 		blockstate, chunkid, objectid, nbytes, blockseq = oob.unpack('CNNnN')
 		tag = {
 			#:raw => oob,
@@ -59,14 +106,6 @@ class YaFFS2
 				:objtype => objtype,	# 1: file, 3: directory
 				:fname => fname
 		end
-
-		# yaffs1
-		# XXX defined as a bitfield, maybe endianness is wrong
-		# dw1, dw2 = oob.unpack('NN')
-		# :chunkid  => ((dw1 >>  0) & ((1 << 20) - 1)),
-		# :serialnr => ((dw1 >> 20) & ((1 <<  2) - 1)),
-		# :nbytes   => ((dw1 >> 22) & ((1 << 10) - 1)),
-		# :objectid => ((dw2 >>  0) & ((1 << 18) - 1)),
 
 		tag
 	end
