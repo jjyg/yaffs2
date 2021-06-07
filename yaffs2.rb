@@ -190,7 +190,7 @@ class YaFFS2
 			File.open(File.join(dirname, curname), 'wb') { |fd|
 				content.keys.sort.each { |i|
 					next if i == 0	# first chunkid = 1
-					fd.pos = i*@chunksize
+					fd.pos = (i-1)*@chunksize
 					fd.write content[i]
 				}
 				fd.truncate(last_oob[:nbytes]) if last_oob
