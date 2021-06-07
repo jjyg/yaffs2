@@ -52,6 +52,10 @@ class YaFFS2
 	def parse_oob_yaffs1(oob, chunk, chunkseq)
 		dw1, _x, _x, w2, _x, _x, _x, w3 = oob.unpack('NCCnCCCn')
 		dw2 = (w2 << 16) | w3
+		if dw1 == 0xffffffff and dw2 == 0xffffffff
+			# unused block
+			return({ :raw => oob.unpack('H*') })
+		end
 		tag = {
 			:chunkid  => ((dw1 >> 12) & ((1 << 20) - 1)),
 			:serialnr => ((dw1 >> 10) & ((1 <<  2) - 1)),
